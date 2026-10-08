@@ -100,3 +100,14 @@ QT_QPA_PLATFORM=xcb python main.py
 
 이 설정은 X11/XWayland 서버와 Qt xcb 관련 라이브러리가 설치된 환경에서 동작합니다.
 실행 시 `logs/app.log`의 `QT_PLATFORM_SELECTED` 이벤트를 확인하세요.
+
+## ChromeOS/Crostini 파일 드래그 앤 드롭
+
+Crostini에서 Wayland 연결 종료를 방지하기 위해 X11(xcb)을 사용하면 ChromeOS 파일 앱에서
+X11 앱으로의 파일 드롭이 전달되지 않을 수도 있습니다.
+
+- PDF Helper 파일 목록 또는 빈 창으로 PDF, DOC, DOCX 파일을 끌어 놓을 수 있습니다.
+- 드롭이 전달되지 않는 경우 **파일 추가 ▾ → PDF / Word 한 번에 추가**를 사용하세요.
+- Linux 파일 관리자가 파일 URL을 클립보드에 복사했다면 **클립보드에서 파일 추가**도 사용할 수 있습니다.
+- ChromeOS의 기본 '파일' 앱에서 파일을 복사했을 때는 파일 URL이 클립보드에 전달되지 않을 수도 있습니다.
+- 진단용 `logs/app.log`에는 `DRAG_ENTER`, `WINDOW_DRAG_ENTER`, `DROP_RECEIVED`, `PASTE_FILES` 이벤트를 기록합니다. 이벤트가 없으면 앱 바깥에서 전달되지 않은 것입니다.
