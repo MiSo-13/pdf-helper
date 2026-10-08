@@ -3,7 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtCore import Qt, QMimeData, QUrl
+from PyQt6.QtCore import Qt, QMimeData, QUrl, QPointF
 from PyQt6.QtGui import QDropEvent
 from PyQt6.QtWidgets import QApplication, QFileDialog, QListWidget
 
@@ -28,7 +28,7 @@ def test_drop_two_external_files_and_reorder(app, tmp_path):
     mime = QMimeData()
     mime.setUrls([QUrl.fromLocalFile(first), QUrl.fromLocalFile(second)])
     event = QDropEvent(
-        widget.rect().center().toPointF(), Qt.DropAction.CopyAction,
+        QPointF(widget.rect().center()), Qt.DropAction.CopyAction,
         mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
     )
     widget.dropEvent(event)
