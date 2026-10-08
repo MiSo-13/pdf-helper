@@ -98,7 +98,8 @@ def merge_documents(
                     target = source
                 else:
                     target = convert_word_to_pdf(source, Path(tmp) / str(index))
-                reader = PdfReader(str(target), strict=True)
+                # 비표준 PDF의 중복 키 등은 가능한 범위에서 복구해 읽는다.
+                reader = PdfReader(str(target), strict=False)
                 if reader.is_encrypted:
                     raise ValueError(f"암호화된 입력 PDF는 지원하지 않습니다: {source.name}")
                 writer.append(reader)
