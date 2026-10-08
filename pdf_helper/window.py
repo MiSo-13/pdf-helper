@@ -49,13 +49,13 @@ class FileList(QListWidget):
     def extract_paths(mime):
         # X11 파일 관리자는 text/uri-list 이외의 MIME으로 경로를 전달하기도 한다.
         if mime.hasUrls():
-            paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+            paths = [str(Path(url.toLocalFile())) for url in mime.urls() if url.isLocalFile()]
             if paths:
                 return paths
         if mime.hasText():
             from PyQt6.QtCore import QUrl
             urls = [QUrl(line.strip()) for line in mime.text().splitlines() if line.strip().startswith("file://")]
-            paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+            paths = [str(Path(url.toLocalFile())) for url in urls if url.isLocalFile()]
             if paths:
                 return paths
         return None
