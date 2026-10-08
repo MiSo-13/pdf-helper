@@ -1,4 +1,4 @@
-"""파일 변환, PDF 병합, 선택적 암호화의 순수 서비스 계층."""
+"""순서가 지정된 PDF/Word 문서 병합 및 선택적 AES-256 암호화."""
 from __future__ import annotations
 
 import os
@@ -7,21 +7,21 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Sequence
 
 from pypdf import PdfReader, PdfWriter
 
+SUPPORTED_SUFFIXES = frozenset({".pdf", ".doc", ".docx"})
 PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
 
 
 def generate_password(length: int = 16) -> str:
-    """혼동하기 쉬운 문자를 제외한 암호학적 난수 비밀번호를 생성한다."""
     if length < 12:
         raise ValueError("비밀번호 길이는 12자 이상이어야 합니다.")
     return "".join(secrets.choice(PASSWORD_ALPHABET) for _ in range(length))
 
 
 def find_libreoffice() -> str:
-    """PATH와 알려진 Windows 설치 경로에서 LibreOffice를 찾는다."""
     for name in ("libreoffice", "soffice"):
         found = shutil.which(name)
         if found:
@@ -32,85 +32,99 @@ def find_libreoffice() -> str:
                 candidate = Path(root) / "LibreOffice" / "program" / "soffice.exe"
                 if candidate.is_file():
                     return str(candidate)
-    raise RuntimeError("Word 변환에는 LibreOffice가 필요합니다. 설치 후 다시 실행하세요.")
+    if os.name == "posix":
+        mac_path = Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")
+        if mac_path.is_file():
+            return str(mac_path)
+    raise RuntimeError("Word 변환을 위해 LibreOffice 설치가 필요합니다.")
 
 
 def convert_word_to_pdf(word_path: Path, work_dir: Path) -> Path:
-    """격리된 임시 프로필로 DOCX/DOC를 PDF로 변환한다."""
     word_path = Path(word_path).resolve()
     if word_path.suffix.lower() not in (".docx", ".doc"):
         raise ValueError("Word 파일은 .docx 또는 .doc 형식이어야 합니다.")
     if not word_path.is_file():
         raise FileNotFoundError(f"Word 파일이 없습니다: {word_path}")
     work_dir = Path(work_dir).resolve()
-    profile_dir = work_dir / "lo-profile"
-    profile_dir.mkdir(parents=True, exist_ok=True)
-    # 입력 파일 이름이 충돌하지 않도록 변환 결과는 전용 임시 폴더에 둔다.
-    output_dir = work_dir / "converted"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    profile = work_dir / "lo-profile"
+    profile.mkdir(parents=True, exist_ok=True)
+    output = work_dir / "converted"
+    output.mkdir(parents=True, exist_ok=True)
     command = [
-        find_libreoffice(),
-        f"-env:UserInstallation={profile_dir.as_uri()}",
+        find_libreoffice(), f"-env:UserInstallation={profile.as_uri()}",
         "--headless", "--convert-to", "pdf:writer_pdf_Export",
-        "--outdir", str(output_dir), str(word_path),
+        "--outdir", str(output), str(word_path),
     ]
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("Word → PDF 변환 시간이 초과되었습니다(120초).") from exc
+        raise RuntimeError(f"Word 변환 시간 초과: {word_path.name}") from exc
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        raise RuntimeError(f"Word → PDF 변환 실패: {detail[:500]}")
-    converted = output_dir / f"{word_path.stem}.pdf"
+        raise RuntimeError(f"Word 변환 실패 ({word_path.name}): {(result.stderr or result.stdout).strip()[:500]}")
+    converted = output / (word_path.stem + ".pdf")
     if not converted.is_file() or converted.stat().st_size == 0:
-        raise RuntimeError("Word 변환 결과 PDF가 생성되지 않았습니다.")
+        raise RuntimeError(f"Word 변환 결과가 없습니다: {word_path.name}")
     return converted
 
 
-def create_merged_pdf(
-    pdf_path: str | Path,
-    word_path: str | Path,
+def merge_documents(
+    inputs: Sequence[str | Path],
     output_path: str | Path,
     password: str | None = None,
 ) -> int:
-    """기존 PDF 다음에 Word 변환 PDF를 붙여 안전하게 저장하고 총 페이지 수를 반환한다.
-
-    오류 시 결과 파일을 덮어쓰지 않는다. 암호화는 AES-256을 사용한다.
-    """
-    pdf_path, word_path, output_path = map(lambda p: Path(p).expanduser().resolve(), (pdf_path, word_path, output_path))
-    if pdf_path.suffix.lower() != ".pdf":
-        raise ValueError("원본 파일은 PDF 형식이어야 합니다.")
-    if not pdf_path.is_file():
-        raise FileNotFoundError(f"PDF 파일이 없습니다: {pdf_path}")
-    if output_path in (pdf_path, word_path):
-        raise ValueError("결과 파일은 입력 파일과 다른 경로여야 합니다.")
+    """지정한 순서대로 PDF 및 Word를 병합한다. 실패 시 기존 결과는 보존한다."""
+    if not inputs:
+        raise ValueError("병합할 파일을 하나 이상 추가하세요.")
+    sources = [Path(value).expanduser().resolve() for value in inputs]
+    destination = Path(output_path).expanduser().resolve()
     if password is not None and not password:
         raise ValueError("비밀번호가 비어 있습니다.")
-    if not output_path.parent.is_dir():
+    if not destination.parent.is_dir():
         raise FileNotFoundError("결과 파일을 저장할 폴더가 없습니다.")
+    if destination in sources:
+        raise ValueError("결과 파일은 입력 파일과 다른 경로여야 합니다.")
+    for source in sources:
+        if source.suffix.lower() not in SUPPORTED_SUFFIXES:
+            raise ValueError(f"지원하지 않는 파일 형식: {source.name}")
+        if not source.is_file():
+            raise FileNotFoundError(f"파일이 없습니다: {source}")
 
-    with tempfile.TemporaryDirectory(prefix="pdf-helper-") as tmp:
-        converted = convert_word_to_pdf(word_path, Path(tmp))
-        writer = PdfWriter()
-        for source in (pdf_path, converted):
-            reader = PdfReader(str(source), strict=True)
-            if reader.is_encrypted:
-                raise ValueError(f"암호화된 입력 PDF는 지원하지 않습니다: {source.name}")
-            writer.append(reader)
-        page_count = len(writer.pages)
-        if page_count == 0:
-            raise ValueError("병합할 PDF 페이지가 없습니다.")
-        if password is not None:
-            writer.encrypt(user_password=password, algorithm="AES-256")
-        # 동일한 출력 폴더에 임시 파일 생성 후 완료 시에만 원자적으로 교체한다.
-        fd, staged_name = tempfile.mkstemp(prefix=".pdf-helper-", suffix=".pdf", dir=output_path.parent)
-        try:
-            with os.fdopen(fd, "wb") as stream:
-                writer.write(stream)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(staged_name, output_path)
-        finally:
-            if os.path.exists(staged_name):
-                os.unlink(staged_name)
-        return page_count
+    writer = PdfWriter()
+    try:
+        with tempfile.TemporaryDirectory(prefix="pdf-helper-") as tmp:
+            # Word별 작업 폴더를 분리해 같은 파일명도 결과가 충돌하지 않도록 한다.
+            for index, source in enumerate(sources):
+                if source.suffix.lower() == ".pdf":
+                    target = source
+                else:
+                    target = convert_word_to_pdf(source, Path(tmp) / str(index))
+                reader = PdfReader(str(target), strict=True)
+                if reader.is_encrypted:
+                    raise ValueError(f"암호화된 입력 PDF는 지원하지 않습니다: {source.name}")
+                writer.append(reader)
+            page_count = len(writer.pages)
+            if not page_count:
+                raise ValueError("병합할 PDF 페이지가 없습니다.")
+            if password is not None:
+                writer.encrypt(user_password=password, algorithm="AES-256")
+            fd, staged = tempfile.mkstemp(prefix=".pdf-helper-", suffix=".pdf", dir=destination.parent)
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    writer.write(stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(staged, destination)
+            finally:
+                if os.path.exists(staged):
+                    os.unlink(staged)
+            return page_count
+    finally:
+        writer.close()
+
+
+def create_merged_pdf(
+    pdf_path: str | Path, word_path: str | Path,
+    output_path: str | Path, password: str | None = None,
+) -> int:
+    """기존 두 파일 호출부 호환성 유지."""
+    return merge_documents([pdf_path, word_path], output_path, password)
