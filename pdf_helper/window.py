@@ -7,7 +7,7 @@ from PyQt6.QtGui import QAction, QGuiApplication
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QToolButton,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QApplication,
 )
 
 from .service import SUPPORTED_SUFFIXES, generate_password, merge_documents
@@ -24,23 +24,37 @@ class FileList(QListWidget):
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)
         self.setDragEnabled(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setAlternatingRowColors(True)
         self.setDropIndicatorShown(True)
+        self.setAcceptDrops(True)
 
     def _external_files(self, event):
         # 내부 드래그는 반드시 Qt의 InternalMove 경로에 위임한다.
         if event.source() is self:
             return None
-        mime = event.mimeData()
-        if not mime.hasUrls():
-            return None
-        paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
-        return paths or None
+        return self.extract_paths(event.mimeData())
+
+    @staticmethod
+    def extract_paths(mime):
+        # X11 파일 관리자는 text/uri-list 이외의 MIME으로 경로를 전달하기도 한다.
+        if mime.hasUrls():
+            paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+            if paths:
+                return paths
+        if mime.hasText():
+            from PyQt6.QtCore import QUrl
+            urls = [QUrl(line.strip()) for line in mime.text().splitlines() if line.strip().startswith("file://")]
+            paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+            if paths:
+                return paths
+        return None
 
     def dragEnterEvent(self, event):
+        record_event("DRAG_ENTER", source_internal=event.source() is self,
+                     urls=event.mimeData().hasUrls(), formats=",".join(event.mimeData().formats())[:200])
         if self._external_files(event) is not None:
             event.acceptProposedAction()
         else:
@@ -146,6 +160,7 @@ class PdfHelperWindow(QMainWindow):
         self.install_worker = None
         root = QWidget()
         self.setCentralWidget(root)
+        self.setAcceptDrops(True)
         layout = QVBoxLayout(root)
         layout.setSpacing(10)
         layout.addWidget(QLabel("파일을 위에서 아래 순서로 합칩니다. PDF / Word 파일을 끌어다 놓을 수 있습니다."))
@@ -165,6 +180,9 @@ class PdfHelperWindow(QMainWindow):
             menu.addAction(action)
         self.add_button.setMenu(menu)
         tools.addWidget(self.add_button)
+        paste_button = QPushButton("클립보드에서 파일 추가")
+        paste_button.clicked.connect(self._paste_files)
+        tools.addWidget(paste_button)
         self.remove_button = QPushButton("선택 삭제")
         self.remove_button.clicked.connect(self._remove_selected)
         tools.addWidget(self.remove_button)
@@ -314,6 +332,38 @@ class PdfHelperWindow(QMainWindow):
         if paths and not self.output_field.text():
             first = Path(paths[0])
             self.output_field.setText(str(first.with_name(first.stem + "_merged.pdf")))
+
+    def _paste_files(self):
+        mime = QApplication.clipboard().mimeData()
+        paths = FileList.extract_paths(mime) if mime is not None else None
+        record_event("PASTE_FILES", count=len(paths or []), formats=",".join(mime.formats())[:200] if mime else "none")
+        if paths:
+            self.files.add_paths(paths)
+        else:
+            QMessageBox.information(self, "클립보드", "복사된 PDF/Word 파일 경로가 없습니다. 파일 추가 메뉴를 사용하세요.")
+
+    def dragEnterEvent(self, event):
+        paths = FileList.extract_paths(event.mimeData())
+        record_event("WINDOW_DRAG_ENTER", has_urls=event.mimeData().hasUrls(), count=len(paths or []))
+        if paths:
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if FileList.extract_paths(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        paths = FileList.extract_paths(event.mimeData())
+        record_event("WINDOW_DROP", count=len(paths or []))
+        if paths:
+            event.acceptProposedAction()
+            QTimer.singleShot(0, lambda selected=list(paths): self.files.add_paths(selected))
+        else:
+            super().dropEvent(event)
 
     def _remove_selected(self):
         record_event("REMOVE_SELECTED", count=len(self.files.selectedItems()))
