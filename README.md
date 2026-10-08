@@ -45,3 +45,17 @@ python -m pytest -q
 ```
 
 자세한 구현 구조는 [docs/architecture.md](docs/architecture.md)에서 확인할 수 있습니다.
+
+## 실행 시 자동 의존성 설치
+
+앱 시작 시 LibreOffice를 자동 감지합니다. 이미 설치되었다면 아무 작업도 하지 않습니다.
+설치되지 않은 경우 사용자 확인을 받은 뒤 지원되는 패키지 관리자를 통해 다운로드/설치를 시도합니다.
+
+- Windows: winget (TheDocumentFoundation.LibreOffice)
+- macOS: Homebrew cask (libreoffice)
+- ChromeOS Crostini / Debian 계열 Linux: apt-get 및 pkexec (관리자 인증 필요)
+
+패키지 관리자/인증 도구가 없거나 설치가 실패하면 수동 설치가 필요합니다.
+설치에는 인터넷 연결이 필요하며 시스템 관리자 인증이 요청될 수 있습니다.
+사용자가 설치를 거절해도 **PDF 파일끼리의 병합은 정상적으로 사용할 수 있습니다.**
+실행 파일의 Python/PyQt6/pypdf 라이브러리는 PyInstaller로 포함되며, 배포 파일 실행 시 pip 설치를 수행하지 않습니다.
