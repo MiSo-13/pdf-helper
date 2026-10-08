@@ -32,6 +32,13 @@ class FileList(QListWidget):
         self.setDropIndicatorShown(True)
         self.setAcceptDrops(True)
 
+    def renumber(self):
+        """파일 목록의 현재 행 번호를 병합 순서로 표시한다."""
+        for index in range(self.count()):
+            item = self.item(index)
+            path = Path(item.data(Qt.ItemDataRole.UserRole))
+            item.setText(f"{index + 1}.  {path.name}  ({path.suffix[1:].upper()})")
+
     def _external_files(self, event):
         # 내부 드래그는 반드시 Qt의 InternalMove 경로에 위임한다.
         if event.source() is self:
@@ -76,6 +83,7 @@ class FileList(QListWidget):
             except Exception:
                 log_exception("internal_drop")
                 raise
+            QTimer.singleShot(0, self.renumber)
             record_event("INTERNAL_DROP_FINISHED", count=self.count())
             return
         event.acceptProposedAction()
@@ -99,6 +107,7 @@ class FileList(QListWidget):
             item.setToolTip(str(path))
             self.addItem(item)
             existing.add(str(path))
+        self.renumber()
         record_event("FILES_ADD_FINISH", count=self.count(), skipped=len(skipped))
         if skipped:
             QTimer.singleShot(0, lambda items=list(skipped): QMessageBox.warning(
@@ -166,7 +175,7 @@ class PdfHelperWindow(QMainWindow):
         self.setAcceptDrops(True)
         layout = QVBoxLayout(root)
         layout.setSpacing(10)
-        layout.addWidget(QLabel("파일을 위에서 아래 순서로 합칩니다. PDF / Word 파일을 끌어다 놓을 수 있습니다."))
+        layout.addWidget(QLabel("PDF·Word 파일을 추가하세요. 목록 순서대로 합쳐집니다."))
 
         tools = QHBoxLayout()
         self.add_button = QToolButton()
@@ -183,10 +192,10 @@ class PdfHelperWindow(QMainWindow):
             menu.addAction(action)
         self.add_button.setMenu(menu)
         tools.addWidget(self.add_button)
-        paste_button = QPushButton("클립보드에서 파일 추가")
+        paste_button = QPushButton("붙여넣기 (Ctrl+V)")
         paste_button.clicked.connect(self._paste_files)
         tools.addWidget(paste_button)
-        self.remove_button = QPushButton("선택 삭제")
+        self.remove_button = QPushButton("삭제")
         self.remove_button.clicked.connect(self._remove_selected)
         tools.addWidget(self.remove_button)
         self.up_button = QPushButton("▲ 위로")
@@ -195,7 +204,7 @@ class PdfHelperWindow(QMainWindow):
         self.down_button = QPushButton("▼ 아래로")
         self.down_button.clicked.connect(lambda: self._move(1))
         tools.addWidget(self.down_button)
-        self.clear_button = QPushButton("전체 삭제")
+        self.clear_button = QPushButton("모두 삭제")
         self.clear_button.clicked.connect(lambda: self.files.clear())
         tools.addWidget(self.clear_button)
         tools.addStretch()
@@ -244,9 +253,9 @@ class PdfHelperWindow(QMainWindow):
         self.encrypt_checkbox.toggled.connect(self._toggle_password)
         self.generate_button.click()
 
-        self.status_label = QLabel("Word 변환에는 LibreOffice가 필요합니다.")
+        self.status_label = QLabel("준비")
         layout.addWidget(self.status_label)
-        self.merge_button = QPushButton("순서대로 PDF 병합 및 저장")
+        self.merge_button = QPushButton("PDF 저장")
         self.merge_button.clicked.connect(self._start_merge)
         layout.addWidget(self.merge_button)
         QTimer.singleShot(200, self._check_dependencies)
@@ -267,12 +276,12 @@ class PdfHelperWindow(QMainWindow):
         record_event("DEPENDENCY_CHECK_START")
         if is_installed():
             record_event("DEPENDENCY_PRESENT")
-            self.status_label.setText("LibreOffice 준비 완료 · PDF와 Word 병합 가능")
+            self.status_label.setText("PDF·Word 파일을 사용할 수 있습니다.")
             return
         command, method = install_command()
         record_event("DEPENDENCY_MISSING", automatic=command is not None)
         if command is None:
-            self.status_label.setText("LibreOffice 미설치 · PDF끼리 병합 가능")
+            self.status_label.setText("PDF 병합 가능 · Word 변환은 설치 필요")
             self._show_install_guide(method)
             return
         title, steps = installation_guide()
@@ -287,7 +296,7 @@ class PdfHelperWindow(QMainWindow):
         )
         if answer != QMessageBox.StandardButton.Yes:
             record_event("INSTALL_DECLINED")
-            self.status_label.setText("LibreOffice 설치 건너뜀 · PDF끼리 병합 가능")
+            self.status_label.setText("PDF 병합 가능 · Word 변환은 설치 필요")
             self._show_install_guide()
             return
         record_event("INSTALL_APPROVED")
@@ -324,6 +333,7 @@ class PdfHelperWindow(QMainWindow):
 
     def _refresh_count(self, *args):
         record_event("FILES_MODEL_CHANGED", count=self.files.count())
+        self.files.renumber()
         self.count_label.setText(f"{self.files.count()}개 파일")
 
     def _choose_files(self, filter_text: str):
@@ -408,6 +418,7 @@ class PdfHelperWindow(QMainWindow):
         record_event("REMOVE_SELECTED", count=len(self.files.selectedItems()))
         for item in reversed(self.files.selectedItems()):
             self.files.takeItem(self.files.row(item))
+        self.files.renumber()
 
     def _move(self, delta: int):
         record_event("MOVE_SELECTED", direction=delta, count=len(self.files.selectedItems()))
@@ -419,6 +430,7 @@ class PdfHelperWindow(QMainWindow):
                 self.files.insertItem(target, item)
                 item.setSelected(True)
                 self.files.setCurrentItem(item)
+        self.files.renumber()
 
     def _select_output(self):
         record_event("SAVE_DIALOG_START")
@@ -463,7 +475,7 @@ class PdfHelperWindow(QMainWindow):
         record_event("MERGE_PREPARED", count=len(paths), encrypted=password is not None)
         self.merge_button.setEnabled(False)
         self.files.setEnabled(False)
-        self.status_label.setText("Word 변환 및 PDF 병합 중...")
+        self.status_label.setText("PDF 생성 중...")
         self.thread = QThread(self)
         self.worker = MergeWorker(paths, output, password)
         self.worker.moveToThread(self.thread)
