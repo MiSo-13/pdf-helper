@@ -6,6 +6,7 @@ import pytest
 from PyQt6.QtCore import QMimeData, QUrl, Qt, QPointF
 from PyQt6.QtGui import QDropEvent
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtTest import QTest
 
 from pdf_helper.window import FileList, PdfHelperWindow
 
@@ -57,4 +58,43 @@ def test_clipboard_file_addition(app, tmp_path):
     QApplication.clipboard().setMimeData(mime)
     window._paste_files()
     assert window.files.paths() == [str(path)]
+    window.close()
+
+
+def test_ctrl_v_adds_copied_file(app, tmp_path):
+    window = PdfHelperWindow()
+    window.show()
+    app.processEvents()
+    window.files.setFocus()
+    path = tmp_path / "via-shortcut.pdf"
+    path.write_bytes(b"mock")
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(path))])
+    QApplication.clipboard().setMimeData(mime)
+    QTest.keyClick(window.files, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+    app.processEvents()
+    assert window.files.paths() == [str(path)]
+    window.close()
+
+
+def test_ctrl_v_keeps_text_input_paste(app, tmp_path):
+    window = PdfHelperWindow()
+    window.show()
+    app.processEvents()
+    window.output_field.setFocus()
+    app.processEvents()
+    QApplication.clipboard().setText("test-output")
+    QTest.keyClick(window.output_field, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+    assert "test-output" in window.output_field.text()
+    window.close()
+
+
+def test_ctrl_v_ignores_nonfile_clipboard_on_list(app):
+    window = PdfHelperWindow()
+    window.show()
+    app.processEvents()
+    window.files.setFocus()
+    QApplication.clipboard().setText("ordinary text")
+    QTest.keyClick(window.files, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+    assert window.files.paths() == []
     window.close()
