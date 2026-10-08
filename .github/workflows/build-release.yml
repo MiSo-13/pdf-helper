@@ -45,10 +45,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt pyinstaller
-      - name: 테스트
+      # GUI 이벤트 기반 테스트는 별도 PR CI에서 실행한다.
+      # 릴리즈는 PDF 생성/암호화/설정 등 빠른 기능 테스트만 검증한다.
+      - name: 핵심 기능 테스트
+        timeout-minutes: 3
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q
+        run: python -m pytest -q tests/test_service.py tests/test_multiple_documents.py tests/test_settings.py tests/test_platform_setup.py tests/test_dependencies.py tests/test_install_guide.py
       - name: Windows 빌드
         if: runner.os == 'Windows'
         run: python -m PyInstaller --noconfirm --clean --windowed --name PDF-Helper --onefile main.py
