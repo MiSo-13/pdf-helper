@@ -1,0 +1,97 @@
+name: 다중 운영체제 빌드
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: pdf-helper-windows-x64
+            binary: PDF-Helper.exe
+          - os: macos-15-intel
+            artifact: pdf-helper-macos-intel
+            binary: PDF-Helper.app
+          - os: macos-15
+            artifact: pdf-helper-macos-arm64
+            binary: PDF-Helper.app
+          - os: ubuntu-22.04
+            artifact: pdf-helper-linux-x64
+            binary: PDF-Helper
+          - os: ubuntu-24.04-arm
+            artifact: pdf-helper-linux-arm64
+            binary: PDF-Helper
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Linux Qt 의존성 설치
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
+      - name: 빌드 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt pyinstaller
+      - name: 테스트
+        run: python -m pytest -q
+      - name: Windows 빌드
+        if: runner.os == 'Windows'
+        run: python -m PyInstaller --noconfirm --clean --windowed --name PDF-Helper --onefile main.py
+      - name: macOS 빌드
+        if: runner.os == 'macOS'
+        run: python -m PyInstaller --noconfirm --clean --windowed --name PDF-Helper main.py
+      - name: Linux 빌드
+        if: runner.os == 'Linux'
+        run: python -m PyInstaller --noconfirm --clean --onefile --name PDF-Helper main.py
+      - name: Windows/Linux 결과 업로드
+        if: runner.os != 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.binary }}
+      - name: macOS 앱 압축
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent dist/PDF-Helper.app dist/PDF-Helper.zip
+      - name: macOS 결과 업로드
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/PDF-Helper.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+      - name: 릴리즈 파일명 정리
+        shell: bash
+        run: |
+          mkdir -p package
+          cp release/pdf-helper-windows-x64/PDF-Helper.exe package/PDF-Helper-windows-x64.exe
+          cp release/pdf-helper-linux-x64/PDF-Helper package/PDF-Helper-linux-x64
+          cp release/pdf-helper-linux-arm64/PDF-Helper package/PDF-Helper-linux-arm64
+          cp release/pdf-helper-macos-intel/PDF-Helper.zip package/PDF-Helper-macos-intel.zip
+          cp release/pdf-helper-macos-arm64/PDF-Helper.zip package/PDF-Helper-macos-arm64.zip
+      - name: GitHub Release 업로드
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "${{ github.ref_name }}" package/* --generate-notes
