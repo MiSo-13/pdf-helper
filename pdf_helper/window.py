@@ -21,30 +21,44 @@ class FileList(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setAlternatingRowColors(True)
+        self.setDropIndicatorShown(True)
+
+    def _external_files(self, event):
+        # 내부 드래그는 반드시 Qt의 InternalMove 경로에 위임한다.
+        if event.source() is self:
+            return None
+        mime = event.mimeData()
+        if not mime.hasUrls():
+            return None
+        paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+        return paths or None
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
+        if self._external_files(event) is not None:
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
+        if self._external_files(event) is not None:
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
 
     def dropEvent(self, event):
-        if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
-            self.add_paths([u.toLocalFile() for u in event.mimeData().urls()])
-            event.acceptProposedAction()
-        else:
+        paths = self._external_files(event)
+        if paths is None:
             super().dropEvent(event)
+            return
+        event.acceptProposedAction()
+        # Qt의 dropEvent 도중 model을 직접 변경하지 않고 이벤트 이후 처리한다.
+        QTimer.singleShot(0, lambda selected=list(paths): self.add_paths(selected))
 
     def add_paths(self, paths):
         existing = {self.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.count())}
@@ -63,7 +77,9 @@ class FileList(QListWidget):
             self.addItem(item)
             existing.add(str(path))
         if skipped:
-            QMessageBox.warning(self, "지원하지 않는 파일", "PDF, DOC, DOCX 파일만 추가할 수 있습니다.\n" + "\n".join(skipped[:5]))
+            QTimer.singleShot(0, lambda items=list(skipped): QMessageBox.warning(
+                self, "지원하지 않는 파일", "PDF, DOC, DOCX 파일만 추가할 수 있습니다.\n" + "\n".join(items[:5])
+            ))
 
     def paths(self) -> list[str]:
         return [self.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.count())]
@@ -262,7 +278,10 @@ class PdfHelperWindow(QMainWindow):
         self.count_label.setText(f"{self.files.count()}개 파일")
 
     def _choose_files(self, filter_text: str):
-        paths, _ = QFileDialog.getOpenFileNames(self, "병합할 파일 선택", "", filter_text)
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "병합할 파일 선택", "", filter_text,
+            options=QFileDialog.Option.DontUseNativeDialog
+        )
         self.files.add_paths(paths)
         if paths and not self.output_field.text():
             first = Path(paths[0])
@@ -284,7 +303,8 @@ class PdfHelperWindow(QMainWindow):
 
     def _select_output(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "결과 PDF 저장", self.output_field.text() or "merged.pdf", "PDF (*.pdf)"
+            self, "결과 PDF 저장", self.output_field.text() or "merged.pdf", "PDF (*.pdf)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         if path:
             self.output_field.setText(path if path.lower().endswith(".pdf") else path + ".pdf")
@@ -331,8 +351,8 @@ class PdfHelperWindow(QMainWindow):
 
     def _success(self, pages):
         self.status_label.setText(f"완료: {pages}페이지를 저장했습니다.")
-        QMessageBox.information(self, "완료", f"{pages}페이지 PDF 저장 완료\n{self.output_field.text()}")
+        QTimer.singleShot(0, lambda: QMessageBox.information(self, "완료", f"{pages}페이지 PDF 저장 완료\n{self.output_field.text()}"))
 
     def _failure(self, reason):
         self.status_label.setText("실패: " + reason)
-        QMessageBox.critical(self, "병합 실패", reason)
+        QTimer.singleShot(0, lambda detail=reason: QMessageBox.critical(self, "병합 실패", detail))
