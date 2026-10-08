@@ -60,3 +60,33 @@ def test_macos_bundle_directory(tmp_path):
         settings.sys, "executable", str(exe)
     ), patch.object(settings.sys, "platform", "darwin"):
         assert settings.settings_path() == tmp_path / "data" / "config" / "settings.json"
+
+
+def test_last_input_directory_persisted_separately(tmp_path):
+    config = tmp_path / "settings.json"
+    store = settings.SettingsStore(config)
+    input_folder = tmp_path / "inputs"
+    input_folder.mkdir()
+    source = input_folder / "source.pdf"
+    source.write_bytes(b"%PDF-1.4")
+    output = tmp_path / "result.pdf"
+    assert store.update_output_path(output)
+    assert store.update_input_path(source)
+    restored = settings.SettingsStore(config)
+    assert restored.last_input_directory == str(input_folder)
+    assert restored.last_output_directory == str(tmp_path)
+
+
+def test_missing_input_folder_falls_back(tmp_path):
+    config = tmp_path / "settings.json"
+    config.write_text(json.dumps({"last_input_directory": str(tmp_path / "missing"),
+                                  "last_output_directory": ""}), encoding="utf-8")
+    assert settings.SettingsStore(config).last_input_directory == ""
+
+
+def test_old_config_backward_compatible(tmp_path):
+    config = tmp_path / "settings.json"
+    config.write_text(json.dumps({"last_output_directory": str(tmp_path)}), encoding="utf-8")
+    store = settings.SettingsStore(config)
+    assert store.last_output_directory == str(tmp_path)
+    assert store.last_input_directory == ""
