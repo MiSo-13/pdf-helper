@@ -135,3 +135,9 @@ Windows/Linux/ChromeOS(Crostini)에서는 실행 파일 옆에, macOS에서는 `
 **파일 추가 ▾**로 PDF/Word 파일을 선택하면 그 파일이 들어 있는 폴더를 `last_input_directory`로 기록합니다. 다음에 **파일 추가**를 누르면 해당 폴더에서 선택창이 열립니다. 저장 위치(`last_output_directory`)와 별도로 보존됩니다.
 
 ChromeOS 파일 관리자에서 X11(xcb) 앱으로 드래그가 전달되지 않는 경우 `logs/app.log`에 `DRAG_ENTER` 이벤트 자체가 나타나지 않을 수 있습니다. 이때는 파일 추가 메뉴를 사용하고 ChromeOS **Linux 파일** 위치에서 드래그가 가능한지도 확인해 주세요.
+
+## ChromeOS 파일 복사 후 Ctrl+V로 추가
+
+ChromeOS 파일 앱에서 PDF/Word 파일을 복사한 뒤 PDF Helper 창의 파일 목록을 클릭하고 **Ctrl+V**를 누르면 클립보드에 전달된 `text/uri-list` 파일을 목록에 추가합니다. 일반 텍스트가 복사돼 있다면 파일 추가는 실행하지 않습니다. 저장 경로나 비밀번호를 편집하는 입력칸에서는 일반 텍스트 붙여넣기를 유지합니다.
+
+드래그 앤 드롭이 앱에 전달되는지 진단하기 위해 `QT_EVENT_PROBE`, `DRAG_ENTER`, `WINDOW_DRAG_ENTER` 로그를 기록합니다. 해당 로그가 전혀 없다면 Crostini의 X11 드래그 전달 경로를 추가로 조사해야 합니다.
