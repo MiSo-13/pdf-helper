@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 from .service import SUPPORTED_SUFFIXES, generate_password, merge_documents
 from .dependencies import install_command, install_libreoffice, is_installed
 from .install_guide import installation_guide
+from .diagnostics import event, log_exception, log_directory
 
 
 class FileList(QListWidget):
@@ -53,14 +54,21 @@ class FileList(QListWidget):
 
     def dropEvent(self, event):
         paths = self._external_files(event)
+        event("DROP_RECEIVED", kind="internal" if paths is None else "external", count=len(paths or []))
         if paths is None:
-            super().dropEvent(event)
+            try:
+                super().dropEvent(event)
+            except Exception:
+                log_exception("internal_drop")
+                raise
+            event("INTERNAL_DROP_FINISHED", count=self.count())
             return
         event.acceptProposedAction()
         # Qt의 dropEvent 도중 model을 직접 변경하지 않고 이벤트 이후 처리한다.
         QTimer.singleShot(0, lambda selected=list(paths): self.add_paths(selected))
 
     def add_paths(self, paths):
+        event("FILES_ADD_START", requested=len(paths), current=self.count())
         existing = {self.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.count())}
         skipped = []
         for raw in paths:
@@ -76,6 +84,7 @@ class FileList(QListWidget):
             item.setToolTip(str(path))
             self.addItem(item)
             existing.add(str(path))
+        event("FILES_ADD_FINISH", count=self.count(), skipped=len(skipped))
         if skipped:
             QTimer.singleShot(0, lambda items=list(skipped): QMessageBox.warning(
                 self, "지원하지 않는 파일", "PDF, DOC, DOCX 파일만 추가할 수 있습니다.\n" + "\n".join(items[:5])
@@ -94,11 +103,14 @@ class MergeWorker(QObject):
         self.inputs, self.output, self.password = inputs, output, password
 
     def run(self):
+        event("MERGE_WORKER_START", count=len(self.inputs), encrypted=self.password is not None)
         try:
             pages = merge_documents(self.inputs, self.output, self.password)
         except Exception as exc:
+            log_exception("merge_worker")
             self.failed.emit(str(exc))
         else:
+            event("MERGE_WORKER_DONE", pages=pages)
             self.finished.emit(pages)
 
 
@@ -111,17 +123,21 @@ class InstallWorker(QObject):
         self.command = command
 
     def run(self):
+        event("INSTALL_WORKER_START")
         try:
             install_libreoffice(self.command)
         except Exception as exc:
+            log_exception("install_worker")
             self.failed.emit(str(exc))
         else:
+            event("INSTALL_WORKER_DONE")
             self.finished.emit()
 
 
 class PdfHelperWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        event("MAIN_WINDOW_INIT_START")
         self.setWindowTitle("PDF Helper")
         self.resize(800, 590)
         self.thread = None
@@ -211,6 +227,7 @@ class PdfHelperWindow(QMainWindow):
         self.merge_button.clicked.connect(self._start_merge)
         layout.addWidget(self.merge_button)
         QTimer.singleShot(200, self._check_dependencies)
+        event("MAIN_WINDOW_INIT_FINISH")
 
     def _show_install_guide(self, reason: str = ""):
         title, steps = installation_guide()
@@ -224,10 +241,13 @@ class PdfHelperWindow(QMainWindow):
         message.exec()
 
     def _check_dependencies(self):
+        event("DEPENDENCY_CHECK_START")
         if is_installed():
+            event("DEPENDENCY_PRESENT")
             self.status_label.setText("LibreOffice 준비 완료 · PDF와 Word 병합 가능")
             return
         command, method = install_command()
+        event("DEPENDENCY_MISSING", automatic=command is not None)
         if command is None:
             self.status_label.setText("LibreOffice 미설치 · PDF끼리 병합 가능")
             self._show_install_guide(method)
@@ -243,9 +263,11 @@ class PdfHelperWindow(QMainWindow):
             QMessageBox.StandardButton.Yes
         )
         if answer != QMessageBox.StandardButton.Yes:
+            event("INSTALL_DECLINED")
             self.status_label.setText("LibreOffice 설치 건너뜀 · PDF끼리 병합 가능")
             self._show_install_guide()
             return
+        event("INSTALL_APPROVED")
         self.status_label.setText(f"{method}로 LibreOffice 설치 중...")
         self.merge_button.setEnabled(False)
         self.install_thread = QThread(self)
@@ -262,36 +284,44 @@ class PdfHelperWindow(QMainWindow):
         self.install_thread.start()
 
     def _install_success(self):
+        event("INSTALL_SUCCEEDED")
         self.status_label.setText("LibreOffice 설치 완료 · Word 변환 가능")
         QMessageBox.information(self, "설치 완료", "LibreOffice를 설치했습니다.")
 
     def _install_failed(self, reason):
+        event("INSTALL_FAILED")
         self.status_label.setText("LibreOffice 자동 설치 실패 · PDF끼리 병합 가능")
         self._show_install_guide("자동 설치 실패: " + reason)
 
     def _clear_install_worker(self):
+        event("INSTALL_THREAD_FINISHED")
         self.merge_button.setEnabled(True)
         self.install_thread = None
         self.install_worker = None
 
     def _refresh_count(self, *args):
+        event("FILES_MODEL_CHANGED", count=self.files.count())
         self.count_label.setText(f"{self.files.count()}개 파일")
 
     def _choose_files(self, filter_text: str):
+        event("OPEN_FILE_DIALOG_START")
         paths, _ = QFileDialog.getOpenFileNames(
             self, "병합할 파일 선택", "", filter_text,
             options=QFileDialog.Option.DontUseNativeDialog
         )
+        event("OPEN_FILE_DIALOG_DONE", count=len(paths))
         self.files.add_paths(paths)
         if paths and not self.output_field.text():
             first = Path(paths[0])
             self.output_field.setText(str(first.with_name(first.stem + "_merged.pdf")))
 
     def _remove_selected(self):
+        event("REMOVE_SELECTED", count=len(self.files.selectedItems()))
         for item in reversed(self.files.selectedItems()):
             self.files.takeItem(self.files.row(item))
 
     def _move(self, delta: int):
+        event("MOVE_SELECTED", direction=delta, count=len(self.files.selectedItems()))
         indexes = sorted((self.files.row(item) for item in self.files.selectedItems()), reverse=delta > 0)
         for index in indexes:
             target = index + delta
@@ -302,10 +332,12 @@ class PdfHelperWindow(QMainWindow):
                 self.files.setCurrentItem(item)
 
     def _select_output(self):
+        event("SAVE_DIALOG_START")
         path, _ = QFileDialog.getSaveFileName(
             self, "결과 PDF 저장", self.output_field.text() or "merged.pdf", "PDF (*.pdf)",
             options=QFileDialog.Option.DontUseNativeDialog
         )
+        event("SAVE_DIALOG_DONE", selected=bool(path))
         if path:
             self.output_field.setText(path if path.lower().endswith(".pdf") else path + ".pdf")
 
@@ -314,6 +346,7 @@ class PdfHelperWindow(QMainWindow):
             item.setEnabled(enabled)
 
     def _start_merge(self):
+        event("MERGE_BUTTON_CLICKED")
         paths = self.files.paths()
         output = self.output_field.text().strip()
         if not paths or not output:
@@ -327,6 +360,7 @@ class PdfHelperWindow(QMainWindow):
             answer = QMessageBox.question(self, "덮어쓰기", "결과 파일이 이미 있습니다. 덮어쓸까요?")
             if answer != QMessageBox.StandardButton.Yes:
                 return
+        event("MERGE_PREPARED", count=len(paths), encrypted=password is not None)
         self.merge_button.setEnabled(False)
         self.files.setEnabled(False)
         self.status_label.setText("Word 변환 및 PDF 병합 중...")
@@ -344,15 +378,18 @@ class PdfHelperWindow(QMainWindow):
         self.thread.start()
 
     def _clear_worker(self):
+        event("MERGE_THREAD_FINISHED")
         self.merge_button.setEnabled(True)
         self.files.setEnabled(True)
         self.thread = None
         self.worker = None
 
     def _success(self, pages):
+        event("MERGE_SUCCEEDED", pages=pages)
         self.status_label.setText(f"완료: {pages}페이지를 저장했습니다.")
         QTimer.singleShot(0, lambda: QMessageBox.information(self, "완료", f"{pages}페이지 PDF 저장 완료\n{self.output_field.text()}"))
 
     def _failure(self, reason):
+        event("MERGE_FAILED")
         self.status_label.setText("실패: " + reason)
         QTimer.singleShot(0, lambda detail=reason: QMessageBox.critical(self, "병합 실패", detail))
