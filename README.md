@@ -125,6 +125,13 @@ Windows/Linux/ChromeOS(Crostini)에서는 실행 파일 옆에, macOS에서는 `
 
 ```json
 {
-  "last_output_directory": "/home/user/Documents"
+  "last_output_directory": "/home/user/Documents",
+  "last_input_directory": "/home/user/Downloads"
 }
 ```
+
+## 마지막 입력 폴더 기억하기
+
+**파일 추가 ▾**로 PDF/Word 파일을 선택하면 그 파일이 들어 있는 폴더를 `last_input_directory`로 기록합니다. 다음에 **파일 추가**를 누르면 해당 폴더에서 선택창이 열립니다. 저장 위치(`last_output_directory`)와 별도로 보존됩니다.
+
+ChromeOS 파일 관리자에서 X11(xcb) 앱으로 드래그가 전달되지 않는 경우 `logs/app.log`에 `DRAG_ENTER` 이벤트 자체가 나타나지 않을 수 있습니다. 이때는 파일 추가 메뉴를 사용하고 ChromeOS **Linux 파일** 위치에서 드래그가 가능한지도 확인해 주세요.
