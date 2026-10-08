@@ -93,3 +93,20 @@ def test_convert_command_and_result(tmp_path, monkeypatch):
 
     monkeypatch.setattr(service.subprocess, "run", fake_run)
     assert service.convert_word_to_pdf(word, tmp_path).name == "attachment.pdf"
+
+
+def test_merge_uses_tolerant_pdf_reader(tmp_path, monkeypatch):
+    original = tmp_path / "input.pdf"
+    output = tmp_path / "output.pdf"
+    make_pdf(original, 1)
+    real_reader = service.PdfReader
+    strict_values = []
+
+    def tracking_reader(*args, **kwargs):
+        strict_values.append(kwargs.get("strict"))
+        return real_reader(*args, **kwargs)
+
+    monkeypatch.setattr(service, "PdfReader", tracking_reader)
+    assert service.merge_documents([original], output) == 1
+    assert strict_values == [False]
+    assert len(real_reader(output).pages) == 1
