@@ -84,3 +84,19 @@ python -m pytest -q
 디렉터리에 쓰기 권한이 없으면 로그 생성에 실패할 수 있으니 앱을 **사용자가 쓸 수 있는 폴더**에 배치하세요. 사용자 비밀번호와 PDF/Word 본문은 로그에 기록하지 않도록 설계했지만, 예외 및 Qt 메시지에 경로 등의 정보가 들어갈 수 있으므로 공유 전 확인하세요.
 
 종료 현상을 재현한 뒤 `logs/app.log`의 마지막 부분과 `logs/crash.log`를 확인하면 문제 위치를 좁힐 수 있습니다.
+
+## Crostini Wayland 연결 오류 대응
+
+ChromeOS/Crostini에서 `The Wayland connection broke` 경고와 함께 앱이 종료되는 문제를 줄이기 위해
+Crostini를 감지하고 X11 DISPLAY가 존재할 때 Qt의 `xcb` 백엔드를 사용합니다.
+환경변수 `QT_QPA_PLATFORM`을 사용자가 명시한 경우 해당 설정을 유지합니다.
+일반 Linux, Windows 및 macOS 플랫폼 선택에는 개입하지 않습니다.
+
+문제가 반복된다면 다음 명령으로 우선 실행 경로를 확인할 수 있습니다.
+
+```bash
+QT_QPA_PLATFORM=xcb python main.py
+```
+
+이 설정은 X11/XWayland 서버와 Qt xcb 관련 라이브러리가 설치된 환경에서 동작합니다.
+실행 시 `logs/app.log`의 `QT_PLATFORM_SELECTED` 이벤트를 확인하세요.
