@@ -111,3 +111,20 @@ X11 앱으로의 파일 드롭이 전달되지 않을 수도 있습니다.
 - Linux 파일 관리자가 파일 URL을 클립보드에 복사했다면 **클립보드에서 파일 추가**도 사용할 수 있습니다.
 - ChromeOS의 기본 '파일' 앱에서 파일을 복사했을 때는 파일 URL이 클립보드에 전달되지 않을 수도 있습니다.
 - 진단용 `logs/app.log`에는 `DRAG_ENTER`, `WINDOW_DRAG_ENTER`, `DROP_RECEIVED`, `PASTE_FILES` 이벤트를 기록합니다. 이벤트가 없으면 앱 바깥에서 전달되지 않은 것입니다.
+
+## 마지막 저장 폴더 기억하기
+
+앱 시작 시 실행 파일이 있는 폴더에 `data/config/settings.json`을 생성합니다.
+Windows/Linux/ChromeOS(Crostini)에서는 실행 파일 옆에, macOS에서는 `.app`이 놓인 폴더에 생성됩니다.
+소스(`python main.py`) 실행 시 프로젝트 루트에 생성합니다.
+
+저장 위치를 선택하거나 경로를 직접 입력하면 마지막으로 지정한 **폴더**를 `last_output_directory` 키에 저장합니다.
+다음에 파일을 추가하거나 저장 위치 선택창을 열 때 해당 폴더를 기본 위치로 사용합니다.
+설정 파일이 손상되거나 기존 폴더가 삭제되었으면 기본값으로 복구하여 계속 사용할 수 있습니다.
+설정 파일 쓰기 권한이 없는 폴더에서는 저장이 실패할 수 있습니다.
+
+```json
+{
+  "last_output_directory": "/home/user/Documents"
+}
+```
