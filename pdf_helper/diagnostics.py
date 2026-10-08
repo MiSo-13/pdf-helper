@@ -76,11 +76,23 @@ def enable_diagnostics() -> Path | None:
 def install_qt_logging() -> None:
     """QApplication 생성 전 Qt 메시지를 기록한다. 메시지에 개인정보가 포함될 수 있다."""
     global _qt_handler
-    from PyQt6.QtCore import qInstallMessageHandler
+    from PyQt6.QtCore import QtMsgType, qInstallMessageHandler
 
     def handler(mode, context, message):
-        level = logging.ERROR if int(mode) >= 2 else logging.WARNING
-        _LOGGER.log(level, "QT mode=%s %s", int(mode), message)
+        # Qt 콜백에서 예외를 밖으로 전파하면 프로세스가 종료될 수 있다.
+        try:
+            levels = {
+                QtMsgType.QtDebugMsg: logging.DEBUG,
+                QtMsgType.QtInfoMsg: logging.INFO,
+                QtMsgType.QtWarningMsg: logging.WARNING,
+                QtMsgType.QtCriticalMsg: logging.ERROR,
+                QtMsgType.QtFatalMsg: logging.CRITICAL,
+            }
+            level = levels.get(mode, logging.WARNING)
+            _LOGGER.log(level, "QT mode=%s %s", getattr(mode, "name", str(mode)), message)
+        except BaseException:
+            # 로깅 실패가 사용자 GUI를 종료시키지 않도록 한다.
+            pass
 
     _qt_handler = handler  # Python 콜백 참조 유지
     qInstallMessageHandler(_qt_handler)
