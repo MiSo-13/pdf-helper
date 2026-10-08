@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QGuiApplication
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .service import SUPPORTED_SUFFIXES, generate_password, merge_documents
+from .dependencies import install_command, install_libreoffice, is_installed
 
 
 class FileList(QListWidget):
@@ -84,6 +85,23 @@ class MergeWorker(QObject):
             self.finished.emit(pages)
 
 
+class InstallWorker(QObject):
+    finished = pyqtSignal()
+    failed = pyqtSignal(str)
+
+    def __init__(self, command):
+        super().__init__()
+        self.command = command
+
+    def run(self):
+        try:
+            install_libreoffice(self.command)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        else:
+            self.finished.emit()
+
+
 class PdfHelperWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -91,6 +109,8 @@ class PdfHelperWindow(QMainWindow):
         self.resize(800, 590)
         self.thread = None
         self.worker = None
+        self.install_thread = None
+        self.install_worker = None
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
@@ -173,6 +193,65 @@ class PdfHelperWindow(QMainWindow):
         self.merge_button = QPushButton("순서대로 PDF 병합 및 저장")
         self.merge_button.clicked.connect(self._start_merge)
         layout.addWidget(self.merge_button)
+        QTimer.singleShot(200, self._check_dependencies)
+
+    def _check_dependencies(self):
+        if is_installed():
+            self.status_label.setText("LibreOffice 준비 완료 · PDF와 Word 병합 가능")
+            return
+        command, method = install_command()
+        if command is None:
+            self.status_label.setText("LibreOffice 미설치 · PDF끼리 병합은 가능")
+            QMessageBox.information(
+                self, "Word 변환 도구 필요",
+                f"Word 변환에 LibreOffice가 필요합니다.\\n{method}\\n"
+                "공식 다운로드: https://www.libreoffice.org/download/download-libreoffice/\\n"
+                "설치하지 않아도 PDF끼리 병합할 수 있습니다."
+            )
+            return
+        answer = QMessageBox.question(
+            self, "LibreOffice 설치",
+            "Word 파일을 PDF로 변환하려면 LibreOffice가 필요합니다.\\n"
+            f"설치 방법: {method}\\n"
+            "필요한 파일을 인터넷에서 받고 시스템에 설치할 수 있으며, "
+            "운영체제 관리자 인증이 요구될 수 있습니다.\\n\\n"
+            "지금 설치할까요? (취소해도 PDF끼리 병합할 수 있습니다.)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.status_label.setText("LibreOffice 설치 건너뜀 · PDF끼리 병합 가능")
+            return
+        self.status_label.setText(f"{method}로 LibreOffice 설치 중...")
+        self.merge_button.setEnabled(False)
+        self.install_thread = QThread(self)
+        self.install_worker = InstallWorker(command)
+        self.install_worker.moveToThread(self.install_thread)
+        self.install_thread.started.connect(self.install_worker.run)
+        self.install_worker.finished.connect(self._install_success)
+        self.install_worker.failed.connect(self._install_failed)
+        self.install_worker.finished.connect(self.install_thread.quit)
+        self.install_worker.failed.connect(self.install_thread.quit)
+        self.install_thread.finished.connect(self.install_worker.deleteLater)
+        self.install_thread.finished.connect(self.install_thread.deleteLater)
+        self.install_thread.finished.connect(self._clear_install_worker)
+        self.install_thread.start()
+
+    def _install_success(self):
+        self.status_label.setText("LibreOffice 설치 완료 · Word 변환 가능")
+        QMessageBox.information(self, "설치 완료", "LibreOffice를 설치했습니다.")
+
+    def _install_failed(self, reason):
+        self.status_label.setText("LibreOffice 자동 설치 실패 · PDF끼리 병합 가능")
+        QMessageBox.warning(
+            self, "설치 실패",
+            reason + "\\nLibreOffice 공식 사이트에서 수동 설치할 수 있습니다."
+        )
+
+    def _clear_install_worker(self):
+        self.merge_button.setEnabled(True)
+        self.install_thread = None
+        self.install_worker = None
 
     def _refresh_count(self, *args):
         self.count_label.setText(f"{self.files.count()}개 파일")
