@@ -59,3 +59,13 @@ python -m pytest -q
 설치에는 인터넷 연결이 필요하며 시스템 관리자 인증이 요청될 수 있습니다.
 사용자가 설치를 거절해도 **PDF 파일끼리의 병합은 정상적으로 사용할 수 있습니다.**
 실행 파일의 Python/PyQt6/pypdf 라이브러리는 PyInstaller로 포함되며, 배포 파일 실행 시 pip 설치를 수행하지 않습니다.
+
+## 운영체제별 수동 설치 안내
+
+앱이 LibreOffice를 찾지 못하면 운영체제에 맞는 단계별 설치 방법을 보여줍니다.
+
+- **Windows:** PowerShell에서 `winget install --id TheDocumentFoundation.LibreOffice --exact` 실행. winget이 없다면 공식 홈페이지에서 설치 파일을 내려받습니다.
+- **macOS:** Homebrew 설치 환경이라면 `brew install --cask libreoffice`, 아니라면 공식 홈페이지의 macOS 설치 파일을 사용합니다.
+- **ChromeOS(Crostini) / Debian / Ubuntu:** Linux 터미널에서 `sudo apt update` 다음 `sudo apt install -y libreoffice-writer`. 완료 후 `libreoffice --version`으로 확인합니다.
+
+자동 설치가 불가능하거나 실패해도 수동 설치 절차를 안내하며, PDF 파일만 병합하는 기능은 계속 사용할 수 있습니다.
