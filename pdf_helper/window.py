@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 
 from .service import SUPPORTED_SUFFIXES, generate_password, merge_documents
 from .dependencies import install_command, install_libreoffice, is_installed
+from .install_guide import installation_guide
 
 
 class FileList(QListWidget):
@@ -195,32 +196,39 @@ class PdfHelperWindow(QMainWindow):
         layout.addWidget(self.merge_button)
         QTimer.singleShot(200, self._check_dependencies)
 
+    def _show_install_guide(self, reason: str = ""):
+        title, steps = installation_guide()
+        message = QMessageBox(self)
+        message.setIcon(QMessageBox.Icon.Information)
+        message.setWindowTitle(title)
+        message.setText("Word 변환용 LibreOffice 설치 방법")
+        message.setInformativeText((reason + "\n\n" if reason else "") + steps
+                                   + "\n\n설치하지 않아도 PDF끼리는 병합할 수 있습니다.")
+        message.setStandardButtons(QMessageBox.StandardButton.Ok)
+        message.exec()
+
     def _check_dependencies(self):
         if is_installed():
             self.status_label.setText("LibreOffice 준비 완료 · PDF와 Word 병합 가능")
             return
         command, method = install_command()
         if command is None:
-            self.status_label.setText("LibreOffice 미설치 · PDF끼리 병합은 가능")
-            QMessageBox.information(
-                self, "Word 변환 도구 필요",
-                f"Word 변환에 LibreOffice가 필요합니다.\\n{method}\\n"
-                "공식 다운로드: https://www.libreoffice.org/download/download-libreoffice/\\n"
-                "설치하지 않아도 PDF끼리 병합할 수 있습니다."
-            )
+            self.status_label.setText("LibreOffice 미설치 · PDF끼리 병합 가능")
+            self._show_install_guide(method)
             return
+        title, steps = installation_guide()
         answer = QMessageBox.question(
-            self, "LibreOffice 설치",
-            "Word 파일을 PDF로 변환하려면 LibreOffice가 필요합니다.\\n"
-            f"설치 방법: {method}\\n"
-            "필요한 파일을 인터넷에서 받고 시스템에 설치할 수 있으며, "
-            "운영체제 관리자 인증이 요구될 수 있습니다.\\n\\n"
-            "지금 설치할까요? (취소해도 PDF끼리 병합할 수 있습니다.)",
+            self, "LibreOffice 자동 설치",
+            "Word 파일을 PDF로 변환하려면 LibreOffice가 필요합니다.\n"
+            f"설치 도구: {method}\n\n"
+            "지금 자동 설치를 시도할까요? 관리자 인증과 인터넷 연결이 필요할 수 있습니다.\n"
+            "아니요를 선택하면 수동 설치 방법을 안내합니다.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes
         )
         if answer != QMessageBox.StandardButton.Yes:
             self.status_label.setText("LibreOffice 설치 건너뜀 · PDF끼리 병합 가능")
+            self._show_install_guide()
             return
         self.status_label.setText(f"{method}로 LibreOffice 설치 중...")
         self.merge_button.setEnabled(False)
@@ -243,10 +251,7 @@ class PdfHelperWindow(QMainWindow):
 
     def _install_failed(self, reason):
         self.status_label.setText("LibreOffice 자동 설치 실패 · PDF끼리 병합 가능")
-        QMessageBox.warning(
-            self, "설치 실패",
-            reason + "\\nLibreOffice 공식 사이트에서 수동 설치할 수 있습니다."
-        )
+        self._show_install_guide("자동 설치 실패: " + reason)
 
     def _clear_install_worker(self):
         self.merge_button.setEnabled(True)
