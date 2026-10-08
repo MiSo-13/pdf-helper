@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from PyQt6.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, Qt, QTimer, QEvent, pyqtSignal
 from PyQt6.QtGui import QAction, QGuiApplication
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
@@ -155,6 +155,7 @@ class PdfHelperWindow(QMainWindow):
         record_event("MAIN_WINDOW_INIT_START")
         self.settings = SettingsStore()
         self.setWindowTitle("PDF Helper")
+        QApplication.instance().installEventFilter(self)
         self.resize(800, 590)
         self.thread = None
         self.worker = None
@@ -340,6 +341,36 @@ class PdfHelperWindow(QMainWindow):
             first = Path(paths[0])
             directory = self.settings.last_output_directory
             self.output_field.setText(str(Path(directory or first.parent) / (first.stem + "_merged.pdf")))
+
+    def eventFilter(self, watched, qt_event):
+        """클립보드 파일이 있을 때만 Ctrl+V를 가로채고 텍스트 편집은 유지한다."""
+        kind = qt_event.type()
+        if kind not in (QEvent.Type.KeyPress, QEvent.Type.DragEnter, QEvent.Type.Drop):
+            return super().eventFilter(watched, qt_event)
+        # 다른 창/대화상자의 입력을 방해하지 않는다.
+        if self.isActiveWindow() and (watched is self or
+                                     isinstance(watched, QWidget) and self.isAncestorOf(watched)):
+            if kind in (QEvent.Type.DragEnter, QEvent.Type.Drop):
+                if watched is self or watched is self.files or watched is self.files.viewport():
+                    record_event("QT_EVENT_PROBE", kind=kind.name,
+                                 widget=type(watched).__name__,
+                                 formats=",".join(qt_event.mimeData().formats())[:160])
+            elif (qt_event.key() == Qt.Key.Key_V
+                  and qt_event.modifiers() == Qt.KeyboardModifier.ControlModifier
+                  and not isinstance(watched, QLineEdit)
+                  and not isinstance(QApplication.focusWidget(), QLineEdit)):
+                mime = QApplication.clipboard().mimeData()
+                if mime is not None and FileList.extract_paths(mime):
+                    record_event("CTRL_V_FILES")
+                    self._paste_files()
+                    return True
+        return super().eventFilter(watched, qt_event)
+
+    def closeEvent(self, event):
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        super().closeEvent(event)
 
     def _paste_files(self):
         mime = QApplication.clipboard().mimeData()
