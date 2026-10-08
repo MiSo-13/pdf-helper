@@ -69,3 +69,14 @@ python -m pytest -q
 - **ChromeOS(Crostini) / Debian / Ubuntu:** Linux 터미널에서 `sudo apt update` 다음 `sudo apt install -y libreoffice-writer`. 완료 후 `libreoffice --version`으로 확인합니다.
 
 자동 설치가 불가능하거나 실패해도 수동 설치 절차를 안내하며, PDF 파일만 병합하는 기능은 계속 사용할 수 있습니다.
+
+## 비정상 종료 대응
+
+파일 목록의 외부 드롭 처리와 내부 순서 변경을 분리하고, 드롭 이벤트가 종료된 후 파일을 추가합니다.
+Linux/Crostini에서 발생할 수 있는 운영체제 네이티브 파일 대화상자 문제를 줄이기 위해
+파일 추가 및 저장 위치 선택에 Qt 자체 파일 선택창을 사용합니다.
+
+예기치 않게 앱이 종료되면 운영체제 임시 디렉터리의 `pdf-helper/`에서
+`crash.log`(네이티브 종료 추적) 및 `app.log`(처리되지 않은 Python 오류)를 확인할 수 있습니다.
+일반적인 Linux/Crostini 환경에서는 `/tmp/pdf-helper/` 경로입니다.
+이 로그에는 예외 추적에 포함된 파일 경로 등이 기록될 수 있으므로 공유 전 확인하세요.
