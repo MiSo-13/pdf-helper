@@ -16,12 +16,15 @@ _qt_handler = None
 
 
 def log_directory() -> Path:
-    if sys.platform == "win32":
-        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "PDF-Helper" / "logs"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Logs" / "PDF-Helper"
-    return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "pdf-helper" / "logs"
-
+    """배포 실행파일 옆 또는 소스 프로젝트 루트의 logs 디렉터리."""
+    if getattr(sys, "frozen", False):
+        root = Path(sys.executable).resolve().parent
+        if sys.platform == "darwin" and root.name == "MacOS" and root.parent.name == "Contents":
+            # .app 실행시 앱 번들(읽기 전용일 수 있음) 바깥에 로그 보관.
+            root = root.parent.parent.parent
+    else:
+        root = Path(__file__).resolve().parent.parent
+    return root / "logs"
 
 def logger() -> logging.Logger:
     return _LOGGER
