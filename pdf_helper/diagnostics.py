@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import platform
 import sys
-import tempfile
 import threading
 
 _LOGGER = logging.getLogger("pdf_helper")
@@ -17,7 +16,11 @@ _qt_handler = None
 
 
 def log_directory() -> Path:
-    return Path(tempfile.gettempdir()) / "pdf-helper"
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "PDF-Helper" / "logs"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Logs" / "PDF-Helper"
+    return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "pdf-helper" / "logs"
 
 
 def logger() -> logging.Logger:
