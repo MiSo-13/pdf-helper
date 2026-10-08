@@ -328,10 +328,13 @@ class PdfHelperWindow(QMainWindow):
     def _choose_files(self, filter_text: str):
         record_event("OPEN_FILE_DIALOG_START")
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "병합할 파일 선택", "", filter_text,
+            self, "병합할 파일 선택", self.settings.last_input_directory, filter_text,
             options=QFileDialog.Option.DontUseNativeDialog
         )
         record_event("OPEN_FILE_DIALOG_DONE", count=len(paths))
+        if paths:
+            saved = self.settings.update_input_path(paths[0])
+            record_event("INPUT_DIRECTORY_SETTINGS_UPDATED", success=saved)
         self.files.add_paths(paths)
         if paths and not self.output_field.text():
             first = Path(paths[0])
