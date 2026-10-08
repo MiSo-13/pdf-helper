@@ -1,29 +1,83 @@
-"""PDF 변환·병합·암호화 데스크톱 화면."""
+"""여러 파일을 원하는 순서로 병합하는 PyQt6 UI."""
 from __future__ import annotations
 
 from pathlib import Path
-
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QGuiApplication
 from PyQt6.QtWidgets import (
-    QCheckBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
-    QMainWindow, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QListWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
-from .service import create_merged_pdf, generate_password
+from .service import SUPPORTED_SUFFIXES, generate_password, merge_documents
+
+
+class FileList(QListWidget):
+    """외부 파일 드롭과 목록 내부 드래그 순서 변경을 동시에 허용한다."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setAlternatingRowColors(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
+            self.add_paths([u.toLocalFile() for u in event.mimeData().urls()])
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
+
+    def add_paths(self, paths):
+        existing = {self.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.count())}
+        skipped = []
+        for raw in paths:
+            path = Path(raw).expanduser().resolve()
+            if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
+                skipped.append(str(raw))
+                continue
+            if str(path) in existing:
+                continue
+            from PyQt6.QtWidgets import QListWidgetItem
+            item = QListWidgetItem(f"{path.name}  ({path.suffix.lower()[1:].upper()})")
+            item.setData(Qt.ItemDataRole.UserRole, str(path))
+            item.setToolTip(str(path))
+            self.addItem(item)
+            existing.add(str(path))
+        if skipped:
+            QMessageBox.warning(self, "지원하지 않는 파일", "PDF, DOC, DOCX 파일만 추가할 수 있습니다.\n" + "\n".join(skipped[:5]))
+
+    def paths(self) -> list[str]:
+        return [self.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.count())]
 
 
 class MergeWorker(QObject):
     finished = pyqtSignal(int)
     failed = pyqtSignal(str)
 
-    def __init__(self, pdf: str, word: str, output: str, password: str | None):
+    def __init__(self, inputs: list[str], output: str, password: str | None):
         super().__init__()
-        self.pdf, self.word, self.output, self.password = pdf, word, output, password
+        self.inputs, self.output, self.password = inputs, output, password
 
-    def run(self) -> None:
+    def run(self):
         try:
-            pages = create_merged_pdf(self.pdf, self.word, self.output, self.password)
+            pages = merge_documents(self.inputs, self.output, self.password)
         except Exception as exc:
             self.failed.emit(str(exc))
         else:
@@ -34,111 +88,146 @@ class PdfHelperWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PDF Helper")
-        self.resize(690, 310)
-        self.thread: QThread | None = None
-        self.worker: MergeWorker | None = None
-
+        self.resize(800, 590)
+        self.thread = None
+        self.worker = None
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
-        layout.setSpacing(12)
-        form = QFormLayout()
-        layout.addLayout(form)
+        layout.setSpacing(10)
+        layout.addWidget(QLabel("파일을 위에서 아래 순서로 합칩니다. PDF / Word 파일을 끌어다 놓을 수 있습니다."))
 
-        self.pdf_field = QLineEdit()
-        self.word_field = QLineEdit()
-        self.output_field = QLineEdit()
-        self.pdf_field.setReadOnly(True)
-        self.word_field.setReadOnly(True)
-        for label, field, callback in (
-            ("원본 PDF", self.pdf_field, self._select_pdf),
-            ("추가할 Word", self.word_field, self._select_word),
-            ("저장 위치", self.output_field, self._select_output),
+        tools = QHBoxLayout()
+        self.add_button = QToolButton()
+        self.add_button.setText("파일 추가 ▾")
+        self.add_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self.add_button)
+        for title, filter_text in (
+            ("PDF 추가", "PDF (*.pdf)"),
+            ("Word 추가", "Word (*.doc *.docx)"),
+            ("PDF / Word 한 번에 추가", "문서 (*.pdf *.doc *.docx)"),
         ):
-            wrapper = QWidget()
-            line = QHBoxLayout(wrapper)
-            line.setContentsMargins(0, 0, 0, 0)
-            line.addWidget(field)
-            browse = QPushButton("찾아보기")
-            browse.clicked.connect(callback)
-            line.addWidget(browse)
-            form.addRow(label, wrapper)
+            action = QAction(title, self)
+            action.triggered.connect(lambda checked=False, f=filter_text: self._choose_files(f))
+            menu.addAction(action)
+        self.add_button.setMenu(menu)
+        tools.addWidget(self.add_button)
+        self.remove_button = QPushButton("선택 삭제")
+        self.remove_button.clicked.connect(self._remove_selected)
+        tools.addWidget(self.remove_button)
+        self.up_button = QPushButton("▲ 위로")
+        self.up_button.clicked.connect(lambda: self._move(-1))
+        tools.addWidget(self.up_button)
+        self.down_button = QPushButton("▼ 아래로")
+        self.down_button.clicked.connect(lambda: self._move(1))
+        tools.addWidget(self.down_button)
+        self.clear_button = QPushButton("전체 삭제")
+        self.clear_button.clicked.connect(lambda: self.files.clear())
+        tools.addWidget(self.clear_button)
+        tools.addStretch()
+        layout.addLayout(tools)
 
-        self.encrypt_checkbox = QCheckBox("최종 PDF에 비밀번호 설정 (AES-256)")
+        self.files = FileList()
+        layout.addWidget(self.files, 1)
+        self.files.model().rowsInserted.connect(self._refresh_count)
+        self.files.model().rowsRemoved.connect(self._refresh_count)
+        self.files.model().rowsMoved.connect(self._refresh_count)
+        self.count_label = QLabel("0개 파일")
+        layout.addWidget(self.count_label)
+
+        output_row = QHBoxLayout()
+        output_row.addWidget(QLabel("저장 위치"))
+        self.output_field = QLineEdit()
+        output_row.addWidget(self.output_field, 1)
+        output_button = QPushButton("찾아보기")
+        output_button.clicked.connect(self._select_output)
+        output_row.addWidget(output_button)
+        layout.addLayout(output_row)
+
+        self.encrypt_checkbox = QCheckBox("PDF 열기 비밀번호 설정 (AES-256)")
         self.encrypt_checkbox.setChecked(True)
         layout.addWidget(self.encrypt_checkbox)
-
         password_row = QHBoxLayout()
         self.password_field = QLineEdit()
-        self.password_field.setPlaceholderText("비밀번호를 생성하거나 직접 입력하세요")
         self.password_field.setEchoMode(QLineEdit.EchoMode.Password)
+        password_row.addWidget(self.password_field, 1)
         self.generate_button = QPushButton("자동 생성")
-        self.copy_button = QPushButton("복사")
-        self.show_checkbox = QCheckBox("표시")
-        password_row.addWidget(self.password_field)
-        password_row.addWidget(self.generate_button)
-        password_row.addWidget(self.copy_button)
-        password_row.addWidget(self.show_checkbox)
-        layout.addLayout(password_row)
-
-        self.encrypt_checkbox.toggled.connect(self._toggle_password)
         self.generate_button.clicked.connect(lambda: self.password_field.setText(generate_password()))
+        password_row.addWidget(self.generate_button)
+        self.copy_button = QPushButton("복사")
         self.copy_button.clicked.connect(lambda: QGuiApplication.clipboard().setText(self.password_field.text()))
+        password_row.addWidget(self.copy_button)
+        self.show_checkbox = QCheckBox("표시")
         self.show_checkbox.toggled.connect(
-            lambda checked: self.password_field.setEchoMode(
-                QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
+            lambda enabled: self.password_field.setEchoMode(
+                QLineEdit.EchoMode.Normal if enabled else QLineEdit.EchoMode.Password
             )
         )
+        password_row.addWidget(self.show_checkbox)
+        layout.addLayout(password_row)
+        self.encrypt_checkbox.toggled.connect(self._toggle_password)
         self.generate_button.click()
 
-        self.status_label = QLabel("PDF를 선택한 뒤 Word를 추가해 병합합니다. (Word → PDF 변환에는 LibreOffice 필요)")
-        self.status_label.setWordWrap(True)
+        self.status_label = QLabel("Word 변환에는 LibreOffice가 필요합니다.")
         layout.addWidget(self.status_label)
-        self.merge_button = QPushButton("PDF 생성")
+        self.merge_button = QPushButton("순서대로 PDF 병합 및 저장")
         self.merge_button.clicked.connect(self._start_merge)
         layout.addWidget(self.merge_button)
 
-    def _toggle_password(self, enabled: bool) -> None:
-        for control in (self.password_field, self.generate_button, self.copy_button, self.show_checkbox):
-            control.setEnabled(enabled)
+    def _refresh_count(self, *args):
+        self.count_label.setText(f"{self.files.count()}개 파일")
 
-    def _select_pdf(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "원본 PDF 선택", "", "PDF (*.pdf)")
-        if path:
-            self.pdf_field.setText(path)
-            if not self.output_field.text():
-                self.output_field.setText(str(Path(path).with_name(Path(path).stem + "_merged.pdf")))
+    def _choose_files(self, filter_text: str):
+        paths, _ = QFileDialog.getOpenFileNames(self, "병합할 파일 선택", "", filter_text)
+        self.files.add_paths(paths)
+        if paths and not self.output_field.text():
+            first = Path(paths[0])
+            self.output_field.setText(str(first.with_name(first.stem + "_merged.pdf")))
 
-    def _select_word(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Word 선택", "", "Word (*.docx *.doc)")
-        if path:
-            self.word_field.setText(path)
+    def _remove_selected(self):
+        for item in reversed(self.files.selectedItems()):
+            self.files.takeItem(self.files.row(item))
 
-    def _select_output(self) -> None:
+    def _move(self, delta: int):
+        indexes = sorted((self.files.row(item) for item in self.files.selectedItems()), reverse=delta > 0)
+        for index in indexes:
+            target = index + delta
+            if 0 <= target < self.files.count():
+                item = self.files.takeItem(index)
+                self.files.insertItem(target, item)
+                item.setSelected(True)
+                self.files.setCurrentItem(item)
+
+    def _select_output(self):
         path, _ = QFileDialog.getSaveFileName(
             self, "결과 PDF 저장", self.output_field.text() or "merged.pdf", "PDF (*.pdf)"
         )
         if path:
             self.output_field.setText(path if path.lower().endswith(".pdf") else path + ".pdf")
 
-    def _start_merge(self) -> None:
-        pdf, word, output = (field.text().strip() for field in
-                             (self.pdf_field, self.word_field, self.output_field))
-        if not pdf or not word or not output:
-            QMessageBox.warning(self, "입력 확인", "PDF, Word, 저장 위치를 모두 선택하세요.")
+    def _toggle_password(self, enabled):
+        for item in (self.password_field, self.generate_button, self.copy_button, self.show_checkbox):
+            item.setEnabled(enabled)
+
+    def _start_merge(self):
+        paths = self.files.paths()
+        output = self.output_field.text().strip()
+        if not paths or not output:
+            QMessageBox.warning(self, "입력 확인", "하나 이상의 문서와 저장 위치를 설정하세요.")
             return
         password = self.password_field.text() if self.encrypt_checkbox.isChecked() else None
         if password is not None and not password:
             QMessageBox.warning(self, "비밀번호 확인", "비밀번호를 입력하거나 자동 생성하세요.")
             return
         if Path(output).expanduser().resolve().exists():
-            answer = QMessageBox.question(self, "파일 덮어쓰기", "결과 파일이 이미 존재합니다. 덮어쓸까요?")
+            answer = QMessageBox.question(self, "덮어쓰기", "결과 파일이 이미 있습니다. 덮어쓸까요?")
             if answer != QMessageBox.StandardButton.Yes:
                 return
         self.merge_button.setEnabled(False)
-        self.status_label.setText("변환 및 병합 중...")
+        self.files.setEnabled(False)
+        self.status_label.setText("Word 변환 및 PDF 병합 중...")
         self.thread = QThread(self)
-        self.worker = MergeWorker(pdf, word, output, password)
+        self.worker = MergeWorker(paths, output, password)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.finished.connect(self._success)
@@ -150,15 +239,16 @@ class PdfHelperWindow(QMainWindow):
         self.thread.finished.connect(self._clear_worker)
         self.thread.start()
 
-    def _clear_worker(self) -> None:
+    def _clear_worker(self):
         self.merge_button.setEnabled(True)
+        self.files.setEnabled(True)
         self.thread = None
         self.worker = None
 
-    def _success(self, pages: int) -> None:
-        self.status_label.setText(f"완료: {pages}페이지 PDF를 저장했습니다.")
-        QMessageBox.information(self, "완료", f"PDF 생성 완료 ({pages}페이지)\n{self.output_field.text()}")
+    def _success(self, pages):
+        self.status_label.setText(f"완료: {pages}페이지를 저장했습니다.")
+        QMessageBox.information(self, "완료", f"{pages}페이지 PDF 저장 완료\n{self.output_field.text()}")
 
-    def _failure(self, reason: str) -> None:
+    def _failure(self, reason):
         self.status_label.setText("실패: " + reason)
-        QMessageBox.critical(self, "PDF 생성 실패", reason)
+        QMessageBox.critical(self, "병합 실패", reason)
