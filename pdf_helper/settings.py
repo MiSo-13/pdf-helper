@@ -26,7 +26,7 @@ def settings_path() -> Path:
 class SettingsStore:
     def __init__(self, path: Path | None = None):
         self.path = path if path is not None else settings_path()
-        self._data = {"last_output_directory": ""}
+        self._data = {"last_output_directory": "", "last_input_directory": ""}
         self.load()
 
     def load(self) -> None:
@@ -38,6 +38,8 @@ class SettingsStore:
                     raise ValueError("설정 파일의 루트가 객체가 아닙니다.")
                 value = raw.get("last_output_directory", "")
                 self._data["last_output_directory"] = value if isinstance(value, str) else ""
+                input_value = raw.get("last_input_directory", "")
+                self._data["last_input_directory"] = input_value if isinstance(input_value, str) else ""
             else:
                 self.save()
         except (OSError, ValueError, TypeError) as exc:
@@ -47,6 +49,18 @@ class SettingsStore:
     def last_output_directory(self) -> str:
         value = self._data["last_output_directory"]
         return value if value and Path(value).is_dir() else ""
+
+    @property
+    def last_input_directory(self) -> str:
+        value = self._data["last_input_directory"]
+        return value if value and Path(value).is_dir() else ""
+
+    def update_input_path(self, input_path: str | Path) -> bool:
+        path = Path(input_path).expanduser().resolve()
+        if not path.is_file():
+            return False
+        self._data["last_input_directory"] = str(path.parent)
+        return self.save()
 
     def update_output_path(self, output_path: str | Path) -> bool:
         path = Path(output_path).expanduser().resolve()
