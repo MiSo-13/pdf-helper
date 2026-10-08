@@ -68,3 +68,23 @@ def test_file_selection_uses_qt_dialog(app, tmp_path, monkeypatch):
     assert window.output_field.text() == str(tmp_path / "output.pdf")
     assert all(flag & QFileDialog.Option.DontUseNativeDialog for flag in observed)
     window.close()
+
+
+def test_file_dialog_remembers_last_input_folder(app, tmp_path, monkeypatch):
+    from pdf_helper.settings import SettingsStore
+    directory = tmp_path / "inputs"
+    directory.mkdir()
+    selected = _pdf(directory / "selected.pdf")
+    settings = SettingsStore(tmp_path / "config" / "settings.json")
+    window = PdfHelperWindow()
+    window.settings = settings
+    seen = []
+    def choose(*args, **kwargs):
+        seen.append(args[2])
+        return [selected], "PDF (*.pdf)"
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames", choose)
+    window._choose_files("PDF (*.pdf)")
+    window._choose_files("PDF (*.pdf)")
+    assert seen == ["", str(directory)]
+    assert SettingsStore(settings.path).last_input_directory == str(directory)
+    window.close()

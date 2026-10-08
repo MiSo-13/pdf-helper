@@ -14,6 +14,7 @@ from .service import SUPPORTED_SUFFIXES, generate_password, merge_documents
 from .dependencies import install_command, install_libreoffice, is_installed
 from .install_guide import installation_guide
 from .diagnostics import event as record_event, log_exception
+from .settings import SettingsStore
 
 
 class FileList(QListWidget):
@@ -152,6 +153,7 @@ class PdfHelperWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         record_event("MAIN_WINDOW_INIT_START")
+        self.settings = SettingsStore()
         self.setWindowTitle("PDF Helper")
         self.resize(800, 590)
         self.thread = None
@@ -209,6 +211,8 @@ class PdfHelperWindow(QMainWindow):
         output_row = QHBoxLayout()
         output_row.addWidget(QLabel("저장 위치"))
         self.output_field = QLineEdit()
+        self.output_field.setPlaceholderText("저장할 PDF 파일 경로")
+        self.output_field.editingFinished.connect(self._persist_output_directory)
         output_row.addWidget(self.output_field, 1)
         output_button = QPushButton("찾아보기")
         output_button.clicked.connect(self._select_output)
@@ -324,14 +328,18 @@ class PdfHelperWindow(QMainWindow):
     def _choose_files(self, filter_text: str):
         record_event("OPEN_FILE_DIALOG_START")
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "병합할 파일 선택", "", filter_text,
+            self, "병합할 파일 선택", self.settings.last_input_directory, filter_text,
             options=QFileDialog.Option.DontUseNativeDialog
         )
         record_event("OPEN_FILE_DIALOG_DONE", count=len(paths))
+        if paths:
+            saved = self.settings.update_input_path(paths[0])
+            record_event("INPUT_DIRECTORY_SETTINGS_UPDATED", success=saved)
         self.files.add_paths(paths)
         if paths and not self.output_field.text():
             first = Path(paths[0])
-            self.output_field.setText(str(first.with_name(first.stem + "_merged.pdf")))
+            directory = self.settings.last_output_directory
+            self.output_field.setText(str(Path(directory or first.parent) / (first.stem + "_merged.pdf")))
 
     def _paste_files(self):
         mime = QApplication.clipboard().mimeData()
@@ -383,13 +391,23 @@ class PdfHelperWindow(QMainWindow):
 
     def _select_output(self):
         record_event("SAVE_DIALOG_START")
+        initial = self.output_field.text().strip()
+        if not initial:
+            initial = str(Path(self.settings.last_output_directory) / "merged.pdf") if self.settings.last_output_directory else "merged.pdf"
         path, _ = QFileDialog.getSaveFileName(
-            self, "결과 PDF 저장", self.output_field.text() or "merged.pdf", "PDF (*.pdf)",
+            self, "결과 PDF 저장", initial, "PDF (*.pdf)",
             options=QFileDialog.Option.DontUseNativeDialog
         )
         record_event("SAVE_DIALOG_DONE", selected=bool(path))
         if path:
             self.output_field.setText(path if path.lower().endswith(".pdf") else path + ".pdf")
+            self._persist_output_directory()
+
+    def _persist_output_directory(self):
+        value = self.output_field.text().strip()
+        if value:
+            saved = self.settings.update_output_path(value)
+            record_event("OUTPUT_DIRECTORY_SETTINGS_UPDATED", success=saved)
 
     def _toggle_password(self, enabled):
         for item in (self.password_field, self.generate_button, self.copy_button, self.show_checkbox):
@@ -402,6 +420,7 @@ class PdfHelperWindow(QMainWindow):
         if not paths or not output:
             QMessageBox.warning(self, "입력 확인", "하나 이상의 문서와 저장 위치를 설정하세요.")
             return
+        self._persist_output_directory()
         password = self.password_field.text() if self.encrypt_checkbox.isChecked() else None
         if password is not None and not password:
             QMessageBox.warning(self, "비밀번호 확인", "비밀번호를 입력하거나 자동 생성하세요.")
