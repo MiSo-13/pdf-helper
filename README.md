@@ -1,5 +1,9 @@
 # PDF Helper
 
+**[최신 버전 다운로드](https://github.com/MiSo-13/pdf-helper/releases/latest)** · [OS별 설치·실행 및 릴리즈 안내](docs/release.md)
+
+Windows, macOS, Linux용 실행 파일은 별도 Python 설치 없이 사용할 수 있습니다. ChromeOS는 Linux 개발 환경(Crostini)에서 Linux용 실행 파일을 사용하세요.
+
 PyQt6 기반 PDF·Word 다중 파일 병합 및 AES-256 암호화 도구입니다.
 
 ## 사용 방법
@@ -8,13 +12,13 @@ PyQt6 기반 PDF·Word 다중 파일 병합 및 AES-256 암호화 도구입니�
 2. 목록 내부 드래그 또는 ▲/▼ 버튼으로 순서를 변경합니다. 위에서 아래 순서대로 병합합니다.
 3. 저장할 PDF 경로를 지정합니다.
 4. 비밀번호를 자동 생성하거나 직접 입력합니다. 비밀번호 없이 저장할 수도 있습니다.
-5. **순서대로 PDF 병합 및 저장**을 누릅니다.
+5. **PDF 저장**을 누릅니다.
 
 Word(DOC, DOCX)는 LibreOffice를 사용해 PDF로 변환합니다. PDF 파일만 병합하면 LibreOffice가 필요하지 않습니다.
 
-## 설치 및 실행
+## 개발 환경에서 실행
 
-Python 3.11 이상 및 Word 변환 시 LibreOffice가 필요합니다.
+일반 사용자는 [GitHub Releases](https://github.com/MiSo-13/pdf-helper/releases)에서 운영체제에 맞는 실행 파일을 다운로드하면 됩니다. 아래 명령은 소스 개발용입니다. Python 3.11 이상 및 Word 변환 시 LibreOffice가 필요합니다.
 
 ```bash
 python -m venv .venv
