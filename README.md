@@ -141,3 +141,21 @@ ChromeOS 파일 관리자에서 X11(xcb) 앱으로 드래그가 전달되지 않
 ChromeOS 파일 앱에서 PDF/Word 파일을 복사한 뒤 PDF Helper 창의 파일 목록을 클릭하고 **Ctrl+V**를 누르면 클립보드에 전달된 `text/uri-list` 파일을 목록에 추가합니다. 일반 텍스트가 복사돼 있다면 파일 추가는 실행하지 않습니다. 저장 경로나 비밀번호를 편집하는 입력칸에서는 일반 텍스트 붙여넣기를 유지합니다.
 
 드래그 앤 드롭이 앱에 전달되는지 진단하기 위해 `QT_EVENT_PROBE`, `DRAG_ENTER`, `WINDOW_DRAG_ENTER` 로그를 기록합니다. 해당 로그가 전혀 없다면 Crostini의 X11 드래그 전달 경로를 추가로 조사해야 합니다.
+
+## 앱 아이콘 (크림 소르시에르)
+
+선택한 크림 소르시에르 길드 문양을 앱 창·실행 파일 아이콘으로 사용할 수 있습니다.
+이미지 출처: [ClipartMax — Crime Sorcière Logo](https://www.clipartmax.com/middle/m2i8G6Z5A0H7H7d3_fairy-tail-crime-sorciere-guild-logo-by-elsid37-fairy-tail-crime-sorciere/).
+원본은 **Personal Use**로 표시되므로 저작권자 허가 없이 공개 배포용 바이너리에 포함하지 마세요. 이미지와 변환 아이콘은 Git에 넣지 않으며 아래 명령으로 **로컬에서만** 생성합니다.
+
+```bash
+python -m pip install Pillow pyinstaller
+python scripts/generate_app_icon.py
+python main.py
+# 실행 파일에 아이콘을 포함해 로컬 빌드
+python scripts/build_with_icon.py
+```
+
+생성 경로: `assets/app-icon.png`, `assets/app-icon.ico`, `assets/app-icon.icns`.
+PNG 파일이 있으면 소스 실행에서도 창 아이콘으로 표시됩니다. 로컬 빌드 스크립트는 Windows의 ICO, macOS의 ICNS, Linux의 PNG를 패키징하고, PNG를 실행 파일 내부에도 포함합니다.
+일반 CI/Release 워크플로는 저작권 문제를 피하기 위해 이 문양을 자동으로 내려받거나 배포하지 않습니다.

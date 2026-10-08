@@ -11,3 +11,8 @@ build/
 # 로컬 사용자 설정 및 실행 로그
 data/config/settings.json
 logs/
+
+# 외부 Personal Use 문양을 사용해 로컬에서 생성한 아이콘
+assets/app-icon.png
+assets/app-icon.ico
+assets/app-icon.icns
